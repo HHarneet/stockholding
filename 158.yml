@@ -1,0 +1,42 @@
+---
+- name: CIS Auditd Hardening
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Ensure audit log files are owned by root
+      shell: |
+        [ -f /etc/audit/auditd.conf ] && \
+        find "$(dirname $(awk -F "=" '/^s*log_file/ {print $2}' /etc/audit/auditd.conf | xargs))" \
+        -type f ! -user root -exec chown root {} +
+      changed_when: false
+
+    - name: Ensure audit log files are group-owned by adm
+      shell: |
+        [ -f /etc/audit/auditd.conf ] && \
+        find "$(dirname $(awk -F "=" '/^s*log_file/ {print $2}' /etc/audit/auditd.conf | xargs))" \
+        -type f ! -group adm -exec chgrp adm {} +
+      changed_when: false
+
+    - name: Ensure /var/log/audit is group-owned by adm
+      file:
+        path: /var/log/audit
+        group: adm
+        recurse: yes
+
+    - name: Set log_group = adm in auditd.conf
+      lineinfile:
+        path: /etc/audit/auditd.conf
+        regexp: '^(\s*#\s*)?log_group\s*='
+        line: 'log_group = adm'
+        create: yes
+        backup: yes
+
+    - name: Ensure audit configuration files are 640 or more restrictive
+      shell: |
+        find /etc/audit/ -type f \( -name '*.conf' -o -name '*.rules' \) \
+        -exec chmod u-x,g-wx,o-rwx {} +
+      changed_when: false
+
+    - name: Reload auditd rules (instead of restarting the daemon)
+      command: augenrules --load
