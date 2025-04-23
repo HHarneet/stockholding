@@ -1,40 +1,34 @@
-- name: Ensure successful file system mounts are collected (CIS 5.2.3.10)
+---
+- name: CIS 5.2.3.10 - Audit mount syscall (b32 and b64)
   hosts: all
-  become: true
+  become: yes
   vars:
-    audit_mounts_rules_file: /etc/audit/rules.d/50-mounts.rules
+    audit_mount_rules: "/etc/audit/rules.d/50-mounts.rules"
 
   tasks:
-
-    - name: Get UID_MIN from /etc/login.defs
+    - name: Get UID_MIN from login.defs
       command: awk '/^\s*UID_MIN/ { print $2 }' /etc/login.defs
       register: uid_min_result
       changed_when: false
 
-    - name: Fail if UID_MIN is not found
-      fail:
-        msg: "UID_MIN is not defined in /etc/login.defs."
-      when: uid_min_result.stdout == ""
-
-    - name: Deploy mount audit rules with UID_MIN
+    - name: Ensure mount audit rules exist
       template:
-        src: templates/50-mounts.rules.j2
-        dest: "{{ audit_mounts_rules_file }}"
+        src: "50-mounts.rules.j2"
+        dest: "{{ audit_mount_rules }}"
+        owner: root
+        group: root
         mode: '0640'
-      vars:
-        uid_min: "{{ uid_min_result.stdout }}"
-      notify: Reload audit rules
 
-    - name: Check if audit is in immutable mode (enabled 2)
-      command: auditctl -s
-      register: auditctl_status
+    - name: Load audit rules
+      command: augenrules --load
+      register: load_result
+      failed_when: load_result.rc != 0 and "No rules" in load_result.stdout
       changed_when: false
 
-    - name: Warn if audit is immutable
-      debug:
-        msg: "auditd is in immutable mode (enabled 2). A reboot is required to apply audit rules."
-      when: "'enabled 2' in auditctl_status.stdout"
-
-  handlers:
-    - name: Reload audit rules
-      command: augenrules --load
+    - name: Check if reboot is required due to auditctl status = 2
+      shell: |
+        if [[ $(auditctl -s | grep enabled) =~ "2" ]]; then
+          echo "Reboot required to load rules"
+        fi
+      register: reboot_required_check
+      changed_when: false
