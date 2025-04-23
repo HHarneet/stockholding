@@ -19,7 +19,7 @@
       register: augenrules_result
       failed_when: >
         augenrules_result.rc != 0 and
-        "'No change' not in augenrules_result.stdout"
+        ('No change' not in augenrules_result.stdout | join(' '))
       changed_when: false
 
     - name: Check audit status
