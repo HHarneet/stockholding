@@ -1,39 +1,30 @@
 ---
-- name: Ensure time change events are captured in audit logs
+- name: Ensure time-change audit rules are applied
   hosts: all
-  become: true  # Ensure we run tasks as root
-
+  become: true
   tasks:
-    - name: Ensure the file /etc/audit/rules.d/50-time-change.rules exists and contains the correct rules
-      lineinfile:
-        path: /etc/audit/rules.d/50-time-change.rules
-        create: yes
-        line: |
+    - name: Ensure time-change audit rules file exists
+      copy:
+        dest: /etc/audit/rules.d/50-time-change.rules
+        content: |
           -a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change
           -a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k time-change
           -w /etc/localtime -p wa -k time-change
-      notify:
-        - Reload audit rules
+        mode: '0644'
+        owner: root
+        group: root
 
-    - name: Verify the audit rules are applied correctly
+    - name: Reload audit rules
+      command: augenrules --load
+      ignore_errors: yes
+
+    - name: Check if time-change rules are applied
       command: auditctl -l
-      register: auditctl_output
-      changed_when: false
+      register: audit_rules
+      failed_when: "'time-change' not in audit_rules.stdout"
 
     - name: Fail if time-change rules are not applied
       fail:
         msg: "Time-change audit rules are not applied correctly."
-      when: "'time-change' not in auditctl_output.stdout"
+      when: "'time-change' not in audit_rules.stdout"
 
-  handlers:
-    - name: Reload audit rules
-      command: augenrules --load
-      notify:
-        - Check if reboot is required
-
-    - name: Check if reboot is required
-      command: |
-        if [[ $(auditctl -s | grep "enabled") =~ "2" ]]; then
-          echo "Reboot required to load rules";
-        fi
-      ignore_errors: yes
