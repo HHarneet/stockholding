@@ -1,92 +1,79 @@
 ---
-- name: Auditd Hardening Playbook
+- name: Harden audit log and config file permissions
   hosts: all
-  become: true
+  become: yes
   vars:
-    audit_conf_dir: /etc/audit
-    auditd_conf: /etc/audit/auditd.conf
-    audit_log_dir: "{{ audit_log_dir_path.stdout }}"
     audit_group: adm
+    audit_conf_file: /etc/audit/auditd.conf
+    audit_log_dir: /var/log/audit
+    audit_rule_dir: /etc/audit
+    auditd_unit_file: /usr/lib/systemd/system/auditd.service
 
   tasks:
 
-    - name: Get audit log file path from auditd.conf
-      command: awk -F "=" '/^[[:space:]]*log_file[[:space:]]*=/{print $2}' {{ auditd_conf }}
-      register: audit_log_path_raw
-
-    - name: Trim whitespace from audit log path
-      set_fact:
-        audit_log_dir_path: "{{ audit_log_path_raw.stdout | trim | dirname }}"
-
-    - name: Ensure audit log files are group-owned by adm or root
-      find:
-        paths: "{{ audit_log_dir_path }}"
-        file_type: file
-      register: audit_logs
-
-    - name: Fix group ownership for audit log files
-      file:
-        path: "{{ item.path }}"
-        group: "{{ audit_group }}"
-      loop: "{{ audit_logs.files }}"
-      when: item.grp != audit_group and item.grp != 'root'
-
-    - name: Ensure log_group is set to adm in auditd.conf
-      lineinfile:
-        path: "{{ auditd_conf }}"
-        regexp: '^\s*log_group\s*='
-        line: 'log_group = adm'
+    - name: Ensure adm group exists
+      group:
+        name: "{{ audit_group }}"
         state: present
+
+    - name: Set log_group in auditd.conf to adm
+      lineinfile:
+        path: "{{ audit_conf_file }}"
+        regexp: '^log_group\s*='
+        line: "log_group = {{ audit_group }}"
         create: yes
         backup: yes
 
-    - name: Fix permissions of audit config files (5.2.4.5)
+    - name: Get list of audit log files
       find:
-        paths: "{{ audit_conf_dir }}"
-        recurse: yes
-        patterns:
-          - '*.conf'
-          - '*.rules'
+        paths: "{{ audit_log_dir }}"
         file_type: file
-      register: audit_config_files
+      register: audit_logs
 
-    - name: Set permissions to 0640 for audit config files
+    - name: Get stat info for audit log files
+      stat:
+        path: "{{ item.path }}"
+      loop: "{{ audit_logs.files }}"
+      register: audit_log_stats
+
+    - name: Fix group ownership for audit log files not owned by root or adm
+      file:
+        path: "{{ item.stat.path }}"
+        group: "{{ audit_group }}"
+      loop: "{{ audit_log_stats.results }}"
+      when: item.stat.grp is defined and item.stat.grp not in ['root', audit_group]
+
+    - name: Restrict audit configuration file permissions to 0640 or more restrictive
+      find:
+        paths: "{{ audit_rule_dir }}"
+        patterns: '*.conf,*.rules'
+        file_type: file
+        recurse: yes
+      register: audit_conf_files
+
+    - name: Set permissions on audit configuration files
       file:
         path: "{{ item.path }}"
-        mode: '0640'
-      loop: "{{ audit_config_files.files }}"
+        mode: "0640"
+      loop: "{{ audit_conf_files.files }}"
 
-    - name: Comment out line 23 of audit.rules if it contains 'logfile'
-      lineinfile:
-        path: /etc/audit/audit.rules
-        regexp: '^.*logfile.*$'
-        line: "# Commented out bad line: logfile"
-        state: present
-        backrefs: yes
-      when: >
-        lookup('lines', '/etc/audit/audit.rules') | list | length > 22 and
-        (lookup('lines', '/etc/audit/audit.rules') | list)[22] is search("logfile")
+    - name: Check if auditd can be restarted manually
+      command: systemctl cat auditd
+      register: auditd_status
+      changed_when: false
+      failed_when: false
 
-    - name: Reload audit rules
-      command: augenrules --load
-      register: reload_result
-      failed_when: reload_result.rc != 0
-      ignore_errors: yes
-
-    - name: Check if auditd can be restarted
-      shell: |
-        systemctl cat auditd.service | grep "RefuseManualStop=yes"
-      register: auditd_check
-      ignore_errors: yes
-
-    - name: Restart auditd only if it allows manual control
-      systemd:
+    - name: Restart auditd if possible
+      service:
         name: auditd
         state: restarted
-      when: auditd_check.rc != 0
+      when: "'RefuseManualStart=yes' not in auditd_status.stdout"
 
-    - name: Display reload result if failed
+    - name: Load audit rules using augenrules
+      command: augenrules --load
+      register: augenrules_output
+      failed_when: "'error' in augenrules_output.stderr.lower() or 'was logfile' in augenrules_output.stderr"
+
+    - name: Debug augenrules output
       debug:
-        msg: "{{ reload_result.stderr }}"
-      when: reload_result.failed
-
+        var: augenrules_output
