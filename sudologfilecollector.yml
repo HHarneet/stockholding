@@ -1,69 +1,71 @@
 ---
-- name: Configure and load audit rules for monitoring sudo log
+- name: Ensure events that modify the sudo log file are collected
   hosts: all
-  become: yes
+  become: true
+
   tasks:
 
-    # Step 1: Check and create sudo log monitoring rule
-    - name: Create sudo log monitoring rule file
-      copy:
-        dest: /etc/audit/rules.d/50-sudo.rules
-        content: |
-          # Ensure sudo log file is monitored for modifications
-          SUDO_LOG_FILE=$(grep -r logfile /etc/sudoers* | sed -e 's/.*logfile=//;s/,? .*//' -e 's/""//g')
-          [ -n "${SUDO_LOG_FILE}" ] && echo "-w ${SUDO_LOG_FILE} -p wa -k sudo_log_file" >> /etc/audit/rules.d/50-sudo.rules || echo "ERROR: Variable 'SUDO_LOG_FILE' is unset."
+    # Check if the sudoers configuration contains the logfile setting
+    - name: Check if sudoers file has the logfile directive
+      command: "grep -r logfile /etc/sudoers*"
+      register: sudo_logfile_check
+      failed_when: false
 
-    # Step 2: Verify the existence of sudo log file in sudoers configuration
-    - name: Verify sudo log file exists in sudoers configuration
-      shell: |
-        SUDO_LOG_FILE=$(grep -r logfile /etc/sudoers* | sed -e 's/.*logfile=//;s/,? .*//' -e 's/""//g')
-        echo "SUDO_LOG_FILE: ${SUDO_LOG_FILE}"
-      register: sudo_log_file_check
-      failed_when: sudo_log_file_check.stdout == ""
-
-    # Step 3: Check if the sudo log file monitoring rule is present in current rules
-    - name: Check if sudo log file monitoring rule exists in auditctl
-      shell: |
-        SUDO_LOG_FILE_ESCAPED=$(grep -r logfile /etc/sudoers* | sed -e 's/.*logfile=//;s/,? .*//' -e 's/""//g' -e 's|/|\\/|g')
-        auditctl -l | grep -E "^ *-w.*${SUDO_LOG_FILE_ESCAPED}.*-p.*wa" || echo "FAIL"
-      register: auditctl_check
-      failed_when: "'FAIL' in auditctl_check.stdout"
-
-    # Debug: Output the result of sudo log file rule check
-    - name: Output auditctl rule check result
+    - name: Ensure the logfile directive is set in sudoers
       debug:
-        msg: "{{ auditctl_check.stdout }}"
+        msg: "The sudo log file is configured at: {{ sudo_logfile_check.stdout }}"
+      when: sudo_logfile_check.stdout != ""
 
-    # Step 4: Merge and load the audit rules
+    - name: Fail if logfile directive is not found
+      fail:
+        msg: "No logfile directive found in sudoers configuration. Please configure it before proceeding."
+      when: sudo_logfile_check.stdout == ""
+
+    # Extract the logfile path from sudoers file and escape it for use in the audit rule
+    - name: Set SUDO_LOG_FILE variable
+      set_fact:
+        sudo_log_file: "{{ lookup('pipe', 'grep -r logfile /etc/sudoers* | sed -e \"s/.*logfile=//;s/,? .*//\" -e \"s/\\\"\\\"//g\"') }}"
+
+    - name: Escape sudo log file path for audit rule
+      set_fact:
+        sudo_log_file_escaped: "{{ sudo_log_file | regex_replace('/', '\\\\/') }}"
+
+    # Ensure audit rule for sudo log file is present
+    - name: Add audit rule for sudo log file if not present
+      lineinfile:
+        path: /etc/audit/rules.d/50-sudo.rules
+        line: "-w {{ sudo_log_file }} -p wa -k sudo_log_file"
+        create: yes
+        state: present
+      when: sudo_log_file != ""
+
+    # Merge and load audit rules
     - name: Merge and load the audit rules
       command: augenrules --load
-      register: augenrules_load
-      failed_when: augenrules_load.rc != 0
       ignore_errors: yes
 
-    # Debug: Output result of augenrules load
-    - name: Output augenrules load result
+    - name: Check if reboot is required to load the rules
+      command: "auditctl -s | grep 'enabled' | grep -q '2'"
+      register: auditctl_check
+      failed_when: false
+
+    - name: Inform if reboot is required to load rules
       debug:
-        msg: "augenrules result: {{ augenrules_load.stdout }}"
+        msg: "Reboot required to load audit rules"
+      when: auditctl_check.rc == 0
 
-    # Step 5: Check if reboot is required
-    - name: Check if reboot is required to apply audit rules
-      shell: |
-        if [[ $(auditctl -s | grep "enabled") =~ "2" ]]; then
-          echo "Reboot required to load rules"
-        else
-          echo "No reboot required"
-        fi
-      register: reboot_check
+    # Verify the audit rule is active
+    - name: Verify audit rule for sudo log file is applied
+      command: "auditctl -l | grep -E '^ *-w.*{{ sudo_log_file_escaped }}.*-p.*wa'"
+      register: audit_rule_check
+      failed_when: false
 
-    # Step 6: Output audit rule load result and reboot requirement
-    - name: Output reboot check result
+    - name: Fail if the audit rule for sudo log file is not applied
+      fail:
+        msg: "Audit rule for sudo log file is not properly applied"
+      when: audit_rule_check.stdout == ""
+
+    - name: Success message
       debug:
-        msg: "Audit rules loaded. Reboot check: {{ reboot_check.stdout }}"
+        msg: "Audit rule for sudo log file is successfully applied"
 
-    # Optional: Restart auditd service to ensure rules are applied
-    - name: Restart auditd service to apply rules
-      systemd:
-        name: auditd
-        state: restarted
-      when: reboot_check.stdout == "Reboot required to load rules"
