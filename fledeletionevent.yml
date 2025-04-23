@@ -1,0 +1,56 @@
+---
+- name: Configure and load file deletion audit rules
+  hosts: all
+  become: true
+  tasks:
+
+    - name: Ensure /etc/audit/rules.d directory exists
+      file:
+        path: /etc/audit/rules.d
+        state: directory
+        mode: '0755'
+
+    - name: Get the UID_MIN value from /etc/login.defs
+      command: awk '/^UID_MIN/{print $2}' /etc/login.defs
+      register: uid_min
+      failed_when: uid_min.stdout == ""
+      changed_when: false
+
+    - name: Create 50-delete.rules for file deletion monitoring (64-bit)
+      copy:
+        dest: "/etc/audit/rules.d/50-delete.rules"
+        content: |
+          -a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>=${UID_MIN} -F auid!=unset -F key=delete
+          -a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>=${UID_MIN} -F auid!=unset -F key=delete
+        mode: '0644'
+      when: uid_min.stdout != ""
+      notify:
+        - Load audit rules
+
+    - name: Load the new file deletion audit rules with augenrules
+      command: augenrules --load
+      register: augenrules_result
+      failed_when: augenrules_result.rc != 0
+      changed_when: true
+      when: uid_min.stdout != ""
+
+    - name: Check if a reboot is required
+      command: auditctl -s
+      register: auditctl_status
+      changed_when: false
+      failed_when: false
+
+    - name: Print if reboot is required
+      debug:
+        msg: "Reboot required to load rules"
+      when: "'enabled = 2' in auditctl_status.stdout"
+
+    - name: Ensure auditd service is running
+      service:
+        name: auditd
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Load audit rules
+      command: augenrules --load
