@@ -1,5 +1,4 @@
----
-- name: Ensure successful file system mounts are collected 
+- name: Ensure successful file system mounts are collected (CIS 5.2.3.10)
   hosts: all
   become: true
   vars:
@@ -7,36 +6,23 @@
 
   tasks:
 
-    - name: Get UID_MIN value from /etc/login.defs
+    - name: Get UID_MIN from /etc/login.defs
       command: awk '/^\s*UID_MIN/ { print $2 }' /etc/login.defs
       register: uid_min_result
       changed_when: false
 
     - name: Fail if UID_MIN is not found
       fail:
-        msg: "UID_MIN is not defined in /etc/login.defs. Cannot continue."
+        msg: "UID_MIN is not defined in /etc/login.defs."
       when: uid_min_result.stdout == ""
 
-    - name: Ensure audit rule for b32 mount syscall is present
-      lineinfile:
-        path: "{{ audit_mounts_rules_file }}"
-        line: "-a always,exit -F arch=b32 -S mount -F auid>=${UID_MIN} -F auid!=unset -k mounts"
-        create: yes
+    - name: Deploy mount audit rules with UID_MIN
+      template:
+        src: templates/50-mounts.rules.j2
+        dest: "{{ audit_mounts_rules_file }}"
         mode: '0640'
-        state: present
       vars:
-        UID_MIN: "{{ uid_min_result.stdout }}"
-      notify: Reload audit rules
-
-    - name: Ensure audit rule for b64 mount syscall is present
-      lineinfile:
-        path: "{{ audit_mounts_rules_file }}"
-        line: "-a always,exit -F arch=b64 -S mount -F auid>=${UID_MIN} -F auid!=unset -k mounts"
-        create: yes
-        mode: '0640'
-        state: present
-      vars:
-        UID_MIN: "{{ uid_min_result.stdout }}"
+        uid_min: "{{ uid_min_result.stdout }}"
       notify: Reload audit rules
 
     - name: Check if audit is in immutable mode (enabled 2)
@@ -44,12 +30,11 @@
       register: auditctl_status
       changed_when: false
 
-    - name: Warn if audit is in immutable mode and reboot may be required
+    - name: Warn if audit is immutable
       debug:
-        msg: "auditd is in immutable mode (enabled 2). A reboot is required to load new rules."
+        msg: "auditd is in immutable mode (enabled 2). A reboot is required to apply audit rules."
       when: "'enabled 2' in auditctl_status.stdout"
 
   handlers:
-
     - name: Reload audit rules
       command: augenrules --load
