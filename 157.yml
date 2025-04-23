@@ -1,0 +1,37 @@
+---
+- name: Ensure only authorized groups own audit log files
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Extract audit log file path from auditd.conf
+      shell: |
+        awk -F '=' '/^\s*log_file/ {gsub(/ /, "", $2); print $2}' /etc/audit/auditd.conf
+      register: audit_log_file
+      changed_when: false
+
+    - name: Get audit log directory path
+      shell: dirname "{{ audit_log_file.stdout }}"
+      register: audit_log_dir
+      changed_when: false
+
+    - name: Ensure audit log files are owned by adm group
+      shell: |
+        find "{{ audit_log_dir.stdout }}" -type f \( ! -group adm -a ! -group root \) -exec chgrp adm {} +
+      when: audit_log_dir.stdout != ""
+
+    - name: Set log_group to adm in auditd.conf
+      shell: |
+        sed -ri 's/^\s*#?\s*log_group\s*=.*/log_group = adm/' /etc/audit/auditd.conf
+      args:
+        warn: false
+
+    - name: Ensure /var/log/audit is group-owned by adm
+      shell: chgrp adm /var/log/audit
+
+    - name: Restart auditd to apply group setting changes
+      systemd:
+        name: auditd
+        state: restarted
+        enabled: true
