@@ -14,27 +14,24 @@
       - /sbin/augenrules
 
   tasks:
-    - name: Check if audit tool exists
+    - name: Check which audit tools exist
       ansible.builtin.command: test -f {{ item }}
       register: tool_check
       ignore_errors: true
       loop: "{{ audit_tools }}"
       loop_control:
         label: "{{ item }}"
-      tags: check
 
-    - name: Fix permissions (chmod go-w)
-      ansible.builtin.shell: chmod go-w "{{ item }}"
-      when: tool_check.results[loop.index0].rc == 0
-      loop: "{{ audit_tools }}"
+    - name: Fix permissions (chmod go-w) on existing tools
+      ansible.builtin.shell: chmod go-w "{{ item.item }}"
+      when: item.rc == 0
+      loop: "{{ tool_check.results }}"
       loop_control:
-        label: "{{ item }}"
-      tags: chmod
+        label: "{{ item.item }}"
 
-    - name: Fix ownership (chown root:root)
-      ansible.builtin.shell: chown root:root "{{ item }}"
-      when: tool_check.results[loop.index0].rc == 0
-      loop: "{{ audit_tools }}"
+    - name: Fix ownership (chown root:root) on existing tools
+      ansible.builtin.shell: chown root:root "{{ item.item }}"
+      when: item.rc == 0
+      loop: "{{ tool_check.results }}"
       loop_control:
-        label: "{{ item }}"
-      tags: chown
+        label: "{{ item.item }}"
