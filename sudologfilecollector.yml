@@ -47,19 +47,9 @@
       command: augenrules --load
       ignore_errors: yes
 
-    - name: Check if reboot is required to load the rules
-      command: "auditctl -s | grep 'enabled' | grep -q '2'"
-      register: auditctl_check
-      failed_when: false
-
-    - name: Inform if reboot is required to load rules
-      debug:
-        msg: "Reboot required to load audit rules"
-      when: auditctl_check.rc == 0
-
     # Verify the audit rule is active
     - name: Verify audit rule for sudo log file is applied
-      command: "auditctl -l | grep -E '^ *-w.*{{ sudo_log_file_escaped }}.*-p.*wa'"
+      command: "auditctl -l | grep -E \"^ *-w.*{{ sudo_log_file_escaped }}.*-p.*wa\""
       register: audit_rule_check
       failed_when: false
 
