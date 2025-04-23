@@ -1,7 +1,7 @@
 ---
 - name: Ensure events that modify the sudo log file are collected
   hosts: all
-  become: true
+  become: true  # Ensure we run tasks as root
 
   tasks:
     # Ensure sudoers file has the logfile directive
@@ -34,6 +34,7 @@
       when: "'immutable' in audit_status.stdout"
       notify:
         - Re-enable immutable mode
+      become: true  # Ensure the task is run as root
 
     # Ensure audit rule for sudo log file is present
     - name: Add audit rule for sudo log file if not present
@@ -48,6 +49,7 @@
     - name: Apply audit rule using auditctl directly
       command: "auditctl -w {{ sudo_log_file }} -p wa -k sudo_log_file"
       ignore_errors: yes
+      become: true  # Ensure the task is run as root
 
     # Check if the audit rule has been applied
     - name: Verify audit rule for sudo log file is applied
@@ -71,3 +73,4 @@
     - name: Re-enable immutable mode
       command: auditctl -e 1
       when: "'immutable' in audit_status.stdout"
+      become: true  # Ensure the task is run as root
