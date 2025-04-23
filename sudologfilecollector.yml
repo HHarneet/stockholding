@@ -23,6 +23,18 @@
       set_fact:
         sudo_log_file_escaped: "{{ sudo_log_file | regex_replace('/', '\\\\/') }}"
 
+    # Check if audit system is in immutable mode and disable it temporarily
+    - name: Check if audit system is in immutable mode
+      command: auditctl -s
+      register: audit_status
+      changed_when: false
+
+    - name: Disable immutable mode if necessary
+      command: auditctl -e 0
+      when: "'immutable' in audit_status.stdout"
+      notify:
+        - Re-enable immutable mode
+
     # Ensure audit rule for sudo log file is present
     - name: Add audit rule for sudo log file if not present
       lineinfile:
@@ -55,3 +67,7 @@
   handlers:
     - name: Reload sudoers
       command: "visudo -c"
+    
+    - name: Re-enable immutable mode
+      command: auditctl -e 1
+      when: "'immutable' in audit_status.stdout"
