@@ -29,12 +29,22 @@
       register: auditctl_check
       failed_when: "'FAIL' in auditctl_check.stdout"
 
+    # Debug: Output the result of sudo log file rule check
+    - name: Output auditctl rule check result
+      debug:
+        msg: "{{ auditctl_check.stdout }}"
+
     # Step 4: Merge and load the audit rules
     - name: Merge and load the audit rules
       command: augenrules --load
       register: augenrules_load
       failed_when: augenrules_load.rc != 0
       ignore_errors: yes
+
+    # Debug: Output result of augenrules load
+    - name: Output augenrules load result
+      debug:
+        msg: "augenrules result: {{ augenrules_load.stdout }}"
 
     # Step 5: Check if reboot is required
     - name: Check if reboot is required to apply audit rules
@@ -47,11 +57,11 @@
       register: reboot_check
 
     # Step 6: Output audit rule load result and reboot requirement
-    - name: Output audit rule load result
+    - name: Output reboot check result
       debug:
         msg: "Audit rules loaded. Reboot check: {{ reboot_check.stdout }}"
 
-    # Optional: Restart auditd to ensure rules are applied
+    # Optional: Restart auditd service to ensure rules are applied
     - name: Restart auditd service to apply rules
       systemd:
         name: auditd
