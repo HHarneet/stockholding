@@ -19,8 +19,13 @@
 
     - name: Ensure audit rules are loaded
       command: augenrules --load
+      register: augenrules_output
       notify:
         - Check audit rules
+
+    - name: Wait for a moment before checking if audit rules are loaded
+      pause:
+        seconds: 5
 
     - name: Ensure audit service is running
       service:
