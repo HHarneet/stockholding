@@ -1,3 +1,4 @@
+---
 - name: Ensure audit log directory has permissions 0750 or more restrictive
   ansible.builtin.file:
     path: "{{ audit_log_dir.stdout }}"
