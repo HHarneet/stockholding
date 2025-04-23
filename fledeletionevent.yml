@@ -1,56 +1,38 @@
 ---
-- name: Configure and load file deletion audit rules
+- name: Ensure file deletion events are collected
   hosts: all
-  become: true
+  become: yes
   tasks:
-
-    - name: Ensure /etc/audit/rules.d directory exists
-      file:
-        path: /etc/audit/rules.d
-        state: directory
-        mode: '0755'
-
-    - name: Get the UID_MIN value from /etc/login.defs
-      command: awk '/^UID_MIN/{print $2}' /etc/login.defs
-      register: uid_min
-      failed_when: uid_min.stdout == ""
-      changed_when: false
-
-    - name: Create 50-delete.rules for file deletion monitoring (64-bit)
+    - name: Create audit rule to monitor file deletion events
       copy:
         dest: "/etc/audit/rules.d/50-delete.rules"
         content: |
-          -a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>=${UID_MIN} -F auid!=unset -F key=delete
-          -a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>=${UID_MIN} -F auid!=unset -F key=delete
-        mode: '0644'
-      when: uid_min.stdout != ""
-      notify:
-        - Load audit rules
+          # Monitor file deletion and renaming by users
+          UID_MIN=$(awk '/^UID_MIN/{print $2}' /etc/login.defs)
+          if [ -n "$UID_MIN" ]; then
+            echo "-a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>=\$UID_MIN -F auid!=unset -F key=delete" >> /etc/audit/rules.d/50-delete.rules
+            echo "-a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>=\$UID_MIN -F auid!=unset -F key=delete" >> /etc/audit/rules.d/50-delete.rules
+          else
+            echo "ERROR: UID_MIN variable is unset" >&2
+          fi
+      when: ansible_facts['distribution'] != 'RedHat'
 
-    - name: Load the new file deletion audit rules with augenrules
+    - name: Ensure audit rules are loaded
       command: augenrules --load
-      register: augenrules_result
-      failed_when: augenrules_result.rc != 0
-      changed_when: true
-      when: uid_min.stdout != ""
+      notify:
+        - Check audit rules
 
-    - name: Check if a reboot is required
-      command: auditctl -s
-      register: auditctl_status
-      changed_when: false
-      failed_when: false
-
-    - name: Print if reboot is required
-      debug:
-        msg: "Reboot required to load rules"
-      when: "'enabled = 2' in auditctl_status.stdout"
-
-    - name: Ensure auditd service is running
+    - name: Ensure audit service is running
       service:
         name: auditd
         state: started
-        enabled: true
+        enabled: yes
 
   handlers:
-    - name: Load audit rules
-      command: augenrules --load
+    - name: Check audit rules
+      command: auditctl -l
+      register: auditctl_output
+
+    - name: Print the audit rules output
+      debug:
+        msg: "{{ auditctl_output.stdout }}"
