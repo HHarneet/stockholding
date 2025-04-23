@@ -29,7 +29,7 @@
 
     - name: Warn if audit is in immutable mode and reboot may be required
       debug:
-        msg: "⚠️ auditd is in immutable mode (enabled 2). A reboot is required to load new rules."
+        msg: "auditd is in immutable mode (enabled 2). A reboot is required to load new rules."
       when: "'enabled 2' in auditctl_status.stdout"
 
   handlers:
