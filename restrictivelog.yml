@@ -1,18 +1,21 @@
 ---
-- name: Ensure audit log directory has permissions 0750 or more restrictive
+- name: Ensure audit log directory has 0750 or more restrictive permissions
   hosts: all
   become: true
-  ansible.builtin.file:
-    path: "{{ audit_log_dir.stdout }}"
-    mode: "0750"
-    state: directory
-  when: audit_log_dir.stdout != ""
-  vars:
-    audit_log_file_path: "{{ lookup('file', '/etc/audit/auditd.conf') | regex_search('^\\s*log_file\\s*=\\s*(\\S+)', '\\1') }}"
-  register: audit_log_dir_perm
+  gather_facts: false
 
-- name: Get audit log directory
-  ansible.builtin.command: >
-    dirname "{{ audit_log_file_path }}"
-  register: audit_log_dir
-  changed_when: false
+  tasks:
+    - name: Extract audit log file path from auditd.conf
+      shell: |
+        awk -F= '/^\s*log_file\s*=/ { gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2 }' /etc/audit/auditd.conf
+      register: audit_log_file_path
+      changed_when: false
+
+    - name: Get audit log directory from file path
+      command: dirname "{{ audit_log_file_path.stdout }}"
+      register: audit_log_dir
+      changed_when: false
+
+    - name: Set permissions on audit log directory to 0750
+      command: chmod 0750 "{{ audit_log_dir.stdout }}"
+      when: audit_log_dir.stdout != ""
