@@ -56,7 +56,10 @@
         create: yes
         backup: yes
 
-    - name: Reload audit rules to apply changes
-      ansible.builtin.command: auditctl -R /etc/audit/rules.d/
-      become: yes
+    - name: Reload auditd configuration by sending SIGHUP
+      ansible.builtin.shell: kill -HUP $(pidof auditd)
+      args:
+        warn: false
+      become: true
+
 
