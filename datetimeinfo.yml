@@ -18,6 +18,10 @@
       command: augenrules --load
       ignore_errors: yes
 
+    - name: Wait for a short time to ensure rules are loaded
+      pause:
+        seconds: 2
+
     - name: Check if time-change rules are applied
       command: auditctl -l
       register: audit_rules
@@ -28,3 +32,28 @@
         msg: "Time-change audit rules are not applied correctly."
       when: "'time-change' not in audit_rules.stdout"
 
+    - name: Validate time-change rules for adjtimex (b64)
+      command: auditctl -l | grep -E "adjtimex.*time-change"
+      register: adjtimex_rule
+      failed_when: adjtimex_rule.stdout == ""
+      ignore_errors: yes
+
+    - name: Validate time-change rules for settimeofday (b64)
+      command: auditctl -l | grep -E "settimeofday.*time-change"
+      register: settimeofday_rule
+      failed_when: settimeofday_rule.stdout == ""
+      ignore_errors: yes
+
+    - name: Validate time-change rules for clock_settime (b64)
+      command: auditctl -l | grep -E "clock_settime.*time-change"
+      register: clock_settime_rule
+      failed_when: clock_settime_rule.stdout == ""
+      ignore_errors: yes
+
+    - name: Fail if any of the time-change rules are missing
+      fail:
+        msg: "One or more time-change audit rules are missing."
+      when: 
+        - adjtimex_rule.stdout == ""
+        - settimeofday_rule.stdout == ""
+        - clock_settime_rule.stdout == ""
