@@ -1,0 +1,19 @@
+- name: Ensure audit on-disk and running configuration are the same (CIS 5.2.3.21)
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Load all audit rules from disk using augenrules
+      command: augenrules --load
+      register: augenrules_result
+      changed_when: "'No change' not in augenrules_result.stdout"
+
+    - name: Check if reboot is required (auditd enabled = 2)
+      shell: |
+        auditctl -s | awk '/^enabled/ { if ($2 == 2) print "yes"; else print "no" }'
+      register: reboot_required
+
+    - name: Warn if a reboot is required
+      debug:
+        msg: "A reboot is required to fully load immutable audit mode."
+      when: reboot_required.stdout == "yes"
