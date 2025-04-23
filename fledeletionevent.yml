@@ -3,29 +3,27 @@
   hosts: all
   become: yes
   tasks:
+    - name: Get UID_MIN value
+      command: awk '/^UID_MIN/{print $2}' /etc/login.defs
+      register: uid_min
+      failed_when: uid_min.stdout == ""
+      changed_when: false
+
     - name: Create audit rule to monitor file deletion events
       copy:
         dest: "/etc/audit/rules.d/50-delete.rules"
         content: |
           # Monitor file deletion and renaming by users
-          UID_MIN=$(awk '/^UID_MIN/{print $2}' /etc/login.defs)
-          if [ -n "$UID_MIN" ]; then
-            echo "-a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>=\$UID_MIN -F auid!=unset -F key=delete" >> /etc/audit/rules.d/50-delete.rules
-            echo "-a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>=\$UID_MIN -F auid!=unset -F key=delete" >> /etc/audit/rules.d/50-delete.rules
-          else
-            echo "ERROR: UID_MIN variable is unset" >&2
-          fi
-      when: ansible_facts['distribution'] != 'RedHat'
+          -a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
+          -a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
+      when: uid_min.stdout != ""
 
     - name: Ensure audit rules are loaded
       command: augenrules --load
       register: augenrules_output
+      failed_when: augenrules_output.rc != 0
       notify:
         - Check audit rules
-
-    - name: Wait for a moment before checking if audit rules are loaded
-      pause:
-        seconds: 5
 
     - name: Ensure audit service is running
       service:
