@@ -1,0 +1,40 @@
+---
+- name: Ensure audit tools belong to group root and have correct permissions (raw version)
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    audit_tools:
+      - /sbin/auditctl
+      - /sbin/aureport
+      - /sbin/ausearch
+      - /sbin/autrace
+      - /sbin/auditd
+      - /sbin/augenrules
+
+  tasks:
+    - name: Check if audit tool exists
+      ansible.builtin.command: test -f {{ item }}
+      register: tool_check
+      ignore_errors: true
+      loop: "{{ audit_tools }}"
+      loop_control:
+        label: "{{ item }}"
+      tags: check
+
+    - name: Fix permissions (chmod go-w)
+      ansible.builtin.shell: chmod go-w "{{ item }}"
+      when: tool_check.results[loop.index0].rc == 0
+      loop: "{{ audit_tools }}"
+      loop_control:
+        label: "{{ item }}"
+      tags: chmod
+
+    - name: Fix ownership (chown root:root)
+      ansible.builtin.shell: chown root:root "{{ item }}"
+      when: tool_check.results[loop.index0].rc == 0
+      loop: "{{ audit_tools }}"
+      loop_control:
+        label: "{{ item }}"
+      tags: chown
