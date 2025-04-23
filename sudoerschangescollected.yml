@@ -34,7 +34,6 @@
       systemd:
         name: auditd
         state: restarted
-      when: ansible_facts['os_family'] == 'RedHat'
 
     - name: Check if a reboot is required to apply audit rules
       command: auditctl -s
