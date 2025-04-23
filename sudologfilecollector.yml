@@ -4,28 +4,18 @@
   become: true
 
   tasks:
-
-    # Check if the sudoers configuration contains the logfile setting
-    - name: Check if sudoers file has the logfile directive
-      command: "grep -r logfile /etc/sudoers*"
-      register: sudo_logfile_check
-      failed_when: false
-
-    - name: Add logfile directive if missing in sudoers
+    # Ensure sudoers file has the logfile directive
+    - name: Ensure the logfile directive is set in sudoers
       lineinfile:
         path: /etc/sudoers
         regexp: '^Defaults\s+logfile='
         line: 'Defaults logfile="/var/log/sudo.log"'
         validate: '/usr/sbin/visudo -cf %s'
-      when: sudo_logfile_check.stdout == ""
+      notify:
+        - Reload sudoers
 
-    - name: Ensure the logfile directive is set in sudoers
-      debug:
-        msg: "The sudo log file is configured at: {{ sudo_logfile_check.stdout }}"
-      when: sudo_logfile_check.stdout != ""
-
-    # Extract the logfile path from sudoers file and escape it for use in the audit rule
-    - name: Set SUDO_LOG_FILE variable
+    # Extract sudo log file path from sudoers and escape for audit rule
+    - name: Set sudo_log_file variable
       set_fact:
         sudo_log_file: "{{ lookup('pipe', 'grep -r logfile /etc/sudoers* | sed -e \"s/.*logfile=//;s/,? .*//\" -e \"s/\\\"\\\"//g\"') }}"
 
@@ -42,12 +32,12 @@
         state: present
       when: sudo_log_file != ""
 
-    # Merge and load audit rules
-    - name: Merge and load the audit rules
-      command: augenrules --load
+    # Reload and apply audit rules using auditctl directly
+    - name: Apply audit rule using auditctl directly
+      command: "auditctl -w {{ sudo_log_file }} -p wa -k sudo_log_file"
       ignore_errors: yes
 
-    # Verify the audit rule is active
+    # Check if the audit rule has been applied
     - name: Verify audit rule for sudo log file is applied
       command: "auditctl -l | grep -E \"^ *-w.*{{ sudo_log_file_escaped }}.*-p.*wa\""
       register: audit_rule_check
@@ -61,3 +51,7 @@
     - name: Success message
       debug:
         msg: "Audit rule for sudo log file is successfully applied"
+
+  handlers:
+    - name: Reload sudoers
+      command: "visudo -c"
