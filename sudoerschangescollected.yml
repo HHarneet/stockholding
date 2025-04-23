@@ -1,0 +1,57 @@
+---
+- name: Ensure changes to system administration scope (sudoers) is collected
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Ensure auditd rules directory exists
+      file:
+        path: /etc/audit/rules.d
+        state: directory
+        mode: '0755'
+
+    - name: Create or modify audit rule for /etc/sudoers
+      lineinfile:
+        path: /etc/audit/rules.d/50-scope.rules
+        line: "-w /etc/sudoers -p wa -k scope"
+        create: yes
+        mode: '0644'
+      notify: Reload audit rules
+
+    - name: Create or modify audit rule for /etc/sudoers.d
+      lineinfile:
+        path: /etc/audit/rules.d/50-scope.rules
+        line: "-w /etc/sudoers.d -p wa -k scope"
+        create: yes
+        mode: '0644'
+      notify: Reload audit rules
+
+    - name: Reload audit rules to apply changes
+      command: augenrules --load
+      notify: Restart auditd service
+
+    - name: Ensure auditd service is running
+      systemd:
+        name: auditd
+        state: restarted
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Check if a reboot is required to apply audit rules
+      command: auditctl -s
+      register: auditctl_status
+      changed_when: False
+
+    - name: Print reboot message if required
+      debug:
+        msg: "Reboot is required to apply audit rules."
+      when: "'2' in auditctl_status.stdout"
+
+  handlers:
+    - name: Reload audit rules
+      command: augenrules --load
+      notify: Restart auditd service
+
+    - name: Restart auditd service
+      systemd:
+        name: auditd
+        state: restarted
