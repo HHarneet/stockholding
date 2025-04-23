@@ -1,0 +1,77 @@
+#!/bin/bash
+
+set -euo pipefail
+
+TIMESTAMP=$(date +%F_%H-%M-%S)
+BACKUP_DIR="/var/backups/cis_hardening_$TIMESTAMP"
+mkdir -p "$BACKUP_DIR"
+GROUP=$(getent group daemon >/dev/null && echo "daemon" || echo "root")
+[ "$(id -u)" -ne 0 ] && { echo "Must be run as root"; exit 1; }
+
+echo "Backup directory created at $BACKUP_DIR"
+
+backup_if_exists() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    cp -p "$f" "$BACKUP_DIR/"
+    echo "Backed up $f"
+  fi
+}
+
+echo "Securing /etc/cron.d"
+cp -a /etc/cron.d "$BACKUP_DIR/cron.d.backup"
+chown root:root /etc/cron.d
+chmod 700 /etc/cron.d
+echo "Permissions set on /etc/cron.d"
+
+echo "Checking /etc/cron.allow"
+[ ! -f /etc/cron.allow ] && touch /etc/cron.allow && echo "Created /etc/cron.allow"
+backup_if_exists /etc/cron.allow
+chown root:root /etc/cron.allow
+chmod 640 /etc/cron.allow
+echo "Permissions set on /etc/cron.allow"
+
+if [[ -f /etc/cron.deny ]]; then
+  echo "Checking /etc/cron.deny"
+  backup_if_exists /etc/cron.deny
+  chown root:root /etc/cron.deny
+  chmod 640 /etc/cron.deny
+  echo "Permissions set on /etc/cron.deny"
+fi
+
+echo "Checking /etc/at.allow"
+[ ! -f /etc/at.allow ] && touch /etc/at.allow && echo "Created /etc/at.allow"
+backup_if_exists /etc/at.allow
+chown root:"$GROUP" /etc/at.allow
+chmod 640 /etc/at.allow
+echo "Permissions set on /etc/at.allow"
+
+if [[ -f /etc/at.deny ]]; then
+  echo "Checking /etc/at.deny"
+  backup_if_exists /etc/at.deny
+  chown root:"$GROUP" /etc/at.deny
+  chmod 640 /etc/at.deny
+  echo "Permissions set on /etc/at.deny"
+fi
+
+if [[ -f /etc/ssh/sshd_config ]]; then
+  echo "Securing /etc/ssh/sshd_config"
+  backup_if_exists /etc/ssh/sshd_config
+  chown root:root /etc/ssh/sshd_config
+  chmod 600 /etc/ssh/sshd_config
+  echo "Permissions set on /etc/ssh/sshd_config"
+fi
+
+if [[ -d /etc/ssh/sshd_config.d ]]; then
+  echo "Checking files in /etc/ssh/sshd_config.d"
+  while IFS= read -r -d $'\0' file; do
+    backup_if_exists "$file"
+    chown root:root "$file"
+    chmod 600 "$file"
+    echo "Permissions set on $file"
+  done < <(find /etc/ssh/sshd_config.d -type f -name '*.conf' -print0)
+else
+  echo "Directory /etc/ssh/sshd_config.d does not exist. Skipping."
+fi
+
+echo "All checks completed successfully."
