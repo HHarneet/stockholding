@@ -11,15 +11,18 @@
       register: sudo_logfile_check
       failed_when: false
 
+    - name: Add logfile directive if missing in sudoers
+      lineinfile:
+        path: /etc/sudoers
+        regexp: '^Defaults\s+logfile='
+        line: 'Defaults logfile="/var/log/sudo.log"'
+        validate: '/usr/sbin/visudo -cf %s'
+      when: sudo_logfile_check.stdout == ""
+
     - name: Ensure the logfile directive is set in sudoers
       debug:
         msg: "The sudo log file is configured at: {{ sudo_logfile_check.stdout }}"
       when: sudo_logfile_check.stdout != ""
-
-    - name: Fail if logfile directive is not found
-      fail:
-        msg: "No logfile directive found in sudoers configuration. Please configure it before proceeding."
-      when: sudo_logfile_check.stdout == ""
 
     # Extract the logfile path from sudoers file and escape it for use in the audit rule
     - name: Set SUDO_LOG_FILE variable
@@ -68,4 +71,3 @@
     - name: Success message
       debug:
         msg: "Audit rule for sudo log file is successfully applied"
-
