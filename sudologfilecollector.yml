@@ -4,6 +4,18 @@
   become: true  # Ensure we run tasks as root
 
   tasks:
+    - name: Check if SELinux is enforcing
+      command: getenforce
+      register: selinux_status
+      changed_when: false
+      failed_when: false
+
+    - name: Set SELinux to permissive if enforcing
+      command: setenforce 0
+      when: selinux_status.stdout == "Enforcing"
+      notify:
+        - Revert SELinux to enforcing
+
     - name: Check if audit system is in immutable mode
       command: auditctl -s
       register: audit_status
@@ -61,4 +73,9 @@
     - name: Re-enable immutable mode
       command: auditctl -e 1
       when: "'immutable' in audit_status.stdout"
-      become: true  # Ensure the task is run as root
+      become: true
+
+    - name: Revert SELinux to enforcing
+      command: setenforce 1
+      when: selinux_status.stdout == "Enforcing"
+      become: true
