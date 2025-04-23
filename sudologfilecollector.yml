@@ -1,0 +1,46 @@
+---
+- name: Ensure events modifying sudo log file are collected
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Extract sudo log file path from sudoers
+      shell: |
+        grep -r 'logfile' /etc/sudoers* | sed -e 's/.*logfile=//;s/,? .*//' -e 's/"//g'
+      register: sudo_log_file
+      changed_when: false
+
+    - name: Ensure sudo log file is being monitored by audit
+      lineinfile:
+        path: /etc/audit/rules.d/50-sudo.rules
+        line: "-w {{ sudo_log_file.stdout }} -p wa -k sudo_log_file"
+        create: yes
+        mode: '0640'
+        owner: root
+        group: root
+      when: sudo_log_file.stdout != ""
+
+    - name: Merge and load the audit rules
+      command: augenrules --load
+      register: augenrules_result
+      failed_when: >
+        (augenrules_result.rc != 0) and
+        ('No change' not in augenrules_result.stdout)
+      changed_when: false
+
+    - name: Check audit status and notify if reboot is required
+      command: auditctl -s
+      register: auditctl_status
+      changed_when: false
+
+    - name: Notify if reboot is required (audit not immutable)
+      debug:
+        msg: "Reboot required to enforce audit immutability (-e 2)"
+      when: auditctl_status.stdout is search("enabled[^0-9]*[01]")
+
+    - name: Ensure sudo log file rule is loaded correctly
+      shell: |
+        auditctl -l | grep -q "{{ sudo_log_file.stdout }}.*-p wa.*-k sudo_log_file"
+      register: auditctl_check
+      failed_when: auditctl_check.rc != 0
+      changed_when: false
