@@ -1,19 +1,31 @@
-- name: Ensure audit on-disk and running configuration are the same (CIS 5.2.3.21)
+---
+- name: Ensure audit rules are immutable and running configuration is in sync with disk
   hosts: all
   become: yes
-
   tasks:
+
+    - name: Ensure 99-finalize.rules exists with -e 2
+      copy:
+        dest: /etc/audit/rules.d/99-finalize.rules
+        content: "-e 2\n"
+        owner: root
+        group: root
+        mode: '0640'
+
     - name: Load all audit rules from disk using augenrules
       command: augenrules --load
       register: augenrules_result
-      changed_when: "'No change' not in augenrules_result.stdout"
+      failed_when: >
+        augenrules_result.rc != 0 and
+        "'No change' not in augenrules_result.stdout"
+      changed_when: false
 
-    - name: Check if reboot is required (auditd enabled = 2)
-      shell: |
-        auditctl -s | awk '/^enabled/ { if ($2 == 2) print "yes"; else print "no" }'
-      register: reboot_required
+    - name: Check if audit configuration is in immutable mode (enabled = 2)
+      command: auditctl -s
+      register: auditctl_status
+      changed_when: false
 
-    - name: Warn if a reboot is required
+    - name: Display reboot required message if audit is not immutable
       debug:
-        msg: "A reboot is required to fully load immutable audit mode."
-      when: reboot_required.stdout == "yes"
+        msg: "Reboot required to activate audit immutable (-e 2) setting"
+      when: auditctl_status.stdout is search("enabled[^0-9]*[01]")
