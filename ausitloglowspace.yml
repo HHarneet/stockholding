@@ -1,7 +1,7 @@
 ---
 - name: Ensure system warns when audit logs are low on space
   hosts: all
-  become: yes
+  become: true
   tasks:
 
     - name: Ensure /etc/audit directory exists
