@@ -56,7 +56,7 @@
         create: yes
         backup: yes
 
-    - name: Restart auditd to apply changes
-      service:
-        name: auditd
-        state: restarted
+    - name: Reload audit rules to apply changes
+      ansible.builtin.command: auditctl -R /etc/audit/rules.d/
+      become: yes
+
