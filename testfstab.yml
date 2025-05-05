@@ -26,7 +26,7 @@
         fstype: xfs
         opts: "defaults,rw,nosuid,nodev,noexec,relatime"
         state: mounted
-        passno: 0
+        passno: '0'
         src: /dev/mapper/ocivolume-varTmp
       when: ansible_mounts | selectattr('mount', 'equalto', '/var/tmp') | list | length > 0
 
