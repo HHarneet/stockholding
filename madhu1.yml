@@ -1,0 +1,36 @@
+- name: Configure rsyslog for remote logging (AWX)
+  hosts: all
+  become: yes
+  vars:
+    remote_ip: "{{ remote_ip }}"  
+    timestamp: "{{ ansible_date_time.epoch }}"
+ 
+  tasks:
+    - name: Backup existing rsyslog config with timestamp
+      copy:
+        src: /etc/rsyslog.conf
+        dest: "/etc/rsyslog.conf.bak-{{ timestamp }}"
+        remote_src: yes
+ 
+    - name: Configure rsyslog forwarding
+      lineinfile:
+        path: /etc/rsyslog.conf
+        line: '*.* action(type="omfwd" target="{{ remote_ip }}" port="514" protocol="tcp" action.resumeRetryCount="100" queue.type="LinkedList" queue.size="1000")'
+        state: present
+        insertafter: EOF
+ 
+    - name: Ensure timestamp format is set in rsyslog
+      lineinfile:
+        path: /etc/rsyslog.conf
+        line: '$ActionFileDefaultTemplate RSYSLOG_FileFormat'
+        state: present
+        insertafter: EOF
+ 
+    - name: Restart rsyslog
+      service:
+        name: rsyslog
+        state: restarted
+ 
+    - name: Prompt for manual reboot
+      pause:
+        prompt: "Configuration applied. Please reboot the system manually if necessary."
