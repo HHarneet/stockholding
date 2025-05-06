@@ -19,12 +19,7 @@
       command: augenrules --load
       ignore_errors: false
 
-    - name: Restart auditd to ensure new rules apply (if needed)
-      service:
-        name: auditd
-        state: restarted
-
-    - name: Wait 2 seconds after restarting auditd
+    - name: Pause to allow audit rules to apply
       pause:
         seconds: 2
 
@@ -53,5 +48,5 @@
 
     - name: Fail if /etc/localtime watch rule is missing
       fail:
-        msg: "Missing audit rule for /etc/localtime (watch)"
+        msg: "Missing audit rule for /etc/localtime"
       when: auditctl_output.stdout is not search("-w /etc/localtime -p wa -k time-change")
