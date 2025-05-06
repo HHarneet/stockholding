@@ -4,6 +4,7 @@
   become: true
 
   tasks:
+
     - name: Check if SELinux is enforcing
       command: getenforce
       register: selinux_status
@@ -13,27 +14,26 @@
     - name: Set SELinux to permissive if enforcing
       command: setenforce 0
       when: selinux_status.stdout == "Enforcing"
-      notify:
-        - Revert SELinux to enforcing
+      notify: Revert SELinux to enforcing
 
-    - name: Check audit system status
+    - name: Check if audit system is in immutable mode
       command: auditctl -s
       register: audit_status
       changed_when: false
 
     - name: Parse audit immutable setting
       set_fact:
-        audit_immutable: "{{ audit_status.stdout_lines | select('search', '^immutable') | map('split') | map('last') | first | int }}"
+        audit_immutable: "{{ (audit_status.stdout_lines | select('search', '^immutable') | list | first).split()[-1] | int }}"
+      when: audit_status.stdout_lines | select('search', '^immutable') | list | length > 0
 
-    - name: Disable immutable mode if set to 1
+    - name: Set audit_immutable to 0 if not found
+      set_fact:
+        audit_immutable: 0
+      when: audit_status.stdout_lines | select('search', '^immutable') | list | length == 0
+
+    - name: Disable immutable mode if necessary
       command: auditctl -e 0
       when: audit_immutable == 1
-      notify: Re-enable immutable mode
-
-    - name: Skip if audit system is permanently immutable (mode 2)
-      debug:
-        msg: "Audit system is in immutable mode (2); skipping disable."
-      when: audit_immutable == 2
 
     - name: Ensure the logfile directive is set in sudoers
       lineinfile:
@@ -41,19 +41,13 @@
         regexp: '^Defaults\s+logfile='
         line: 'Defaults logfile="/var/log/sudo.log"'
         validate: '/usr/sbin/visudo -cf %s'
-      notify:
-        - Reload sudoers
-
-    - name: Get sudo log file path from sudoers
-      shell: grep -rE '^Defaults\s+logfile=' /etc/sudoers* | sed -E 's/.*logfile="?([^",]+)"?.*/\1/' | head -n 1
-      register: sudo_log_path
-      changed_when: false
+      notify: Reload sudoers
 
     - name: Set sudo_log_file variable
       set_fact:
-        sudo_log_file: "{{ sudo_log_path.stdout | trim }}"
+        sudo_log_file: "{{ lookup('pipe', 'grep -r logfile /etc/sudoers* | sed -e \"s/.*logfile=//;s/,? .*//\" -e \"s/\\\"\\\"//g\"') | trim }}"
 
-    - name: Escape sudo log file path for audit rule check
+    - name: Escape sudo log file path for audit rule
       set_fact:
         sudo_log_file_escaped: "{{ sudo_log_file | regex_replace('/', '\\\\/') }}"
 
@@ -67,12 +61,11 @@
 
     - name: Reload audit rules
       command: augenrules --load
-      ignore_errors: true
+      ignore_errors: yes
 
     - name: Verify audit rule for sudo log file is applied
-      command: "auditctl -l | grep -E '^ *-w.*{{ sudo_log_file_escaped }}.*-p.*wa'"
+      command: "auditctl -l | grep -E \"^ *-w.*{{ sudo_log_file_escaped }}.*-p.*wa\""
       register: audit_rule_check
-      changed_when: false
       failed_when: false
 
     - name: Fail if the audit rule for sudo log file is not applied
@@ -80,13 +73,14 @@
         msg: "Audit rule for sudo log file is not properly applied"
       when: audit_rule_check.stdout == ""
 
-  handlers:
-    - name: Reload sudoers
-      command: visudo -c
-
-    - name: Re-enable immutable mode
+    - name: Re-enable immutable mode if it was previously enabled
       command: auditctl -e 1
       when: audit_immutable == 1
+
+  handlers:
+
+    - name: Reload sudoers
+      command: "visudo -c"
 
     - name: Revert SELinux to enforcing
       command: setenforce 1
