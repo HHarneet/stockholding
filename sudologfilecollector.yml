@@ -1,82 +1,43 @@
 ---
-- name: Ensure events that modify the sudo log file are collected
+- name: Ensure audit rule for sudo log is applied
   hosts: all
-  become: true
-
+  become: yes
   vars:
-    sudo_log_default: "/var/log/sudo.log"
+    sudo_log_file: /var/log/sudo.log
+
+  handlers:
+    - name: restart auditd
+      service:
+        name: auditd
+        state: restarted
 
   tasks:
-    - name: Check if SELinux is enforcing
-      command: getenforce
-      register: selinux_status
-      changed_when: false
-      failed_when: false
-
-    - name: Set SELinux to permissive if enforcing
-      command: setenforce 0
-      when: selinux_status.stdout == "Enforcing"
-      notify: Revert SELinux to enforcing
-
-    - name: Check if audit system is in immutable mode
-      shell: "auditctl -s | grep 'immutable'"
-      register: audit_immutable
-      changed_when: false
-      failed_when: false
-
-    - name: Disable immutable mode if necessary
-      command: auditctl -e 0
-      when: audit_immutable.stdout is search('immutable\\s+1')
-      ignore_errors: true  # in case of permission error
-
-    - name: Ensure the logfile directive is set in sudoers
-      lineinfile:
-        path: /etc/sudoers
-        regexp: '^Defaults\s+logfile='
-        line: 'Defaults logfile="{{ sudo_log_default }}"'
-        validate: '/usr/sbin/visudo -cf %s'
-      notify: Reload sudoers
-
-    - name: Set sudo_log_file fact (default path)
-      set_fact:
-        sudo_log_file: "{{ sudo_log_default }}"
-
-    - name: Debug sudo log file
-      debug:
-        var: sudo_log_file
-
-    - name: Ensure audit rule for sudo log file exists
-      lineinfile:
-        path: /etc/audit/rules.d/50-sudo.rules
-        line: "-w {{ sudo_log_file }} -p wa -k sudo_log_file"
-        create: yes
-        state: present
-
-    - name: Reload audit rules
-      command: augenrules --load
-      ignore_errors: true
-
-    - name: Verify audit rule for sudo log file is applied
+    - name: "Check current audit rules for sudo log"
       command: auditctl -l
       register: auditctl_output
       changed_when: false
-      failed_when: false
 
-    - name: Fail if the audit rule for sudo log file is not applied
+    - name: "Ensure audit rule is present for sudo log"
+      lineinfile:
+        path: /etc/audit/rules.d/50-sudo.rules
+        line: "-w {{ sudo_log_file }} -p wa -k sudo_log"
+        create: yes
+        state: present
+        owner: root
+        group: root
+        mode: '0640'
+
+    - name: "Reload audit rules"
+      command: augenrules --load
+      notify: restart auditd
+      changed_when: true
+
+    - name: "Re-check audit rules after reload"
+      command: auditctl -l
+      register: auditctl_output
+      changed_when: false
+
+    - name: "Fail if the audit rule for sudo log file is not applied"
       fail:
         msg: "Audit rule for sudo log file is not properly applied"
-      when: auditctl_output.stdout is not search("-w {{ sudo_log_file }}.*-p.*wa")
-
-  handlers:
-    - name: Reload sudoers
-      command: visudo -c
-
-    - name: Re-enable immutable mode
-      command: auditctl -e 1
-      when: audit_immutable.stdout is search('immutable\\s+1')
-      become: true
-
-    - name: Revert SELinux to enforcing
-      command: setenforce 1
-      when: selinux_status.stdout == "Enforcing"
-      become: true
+      when: auditctl_output.stdout is not search("-w " ~ sudo_log_file ~ ".*-p.*wa")
