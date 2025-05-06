@@ -8,22 +8,26 @@
       copy:
         dest: /etc/audit/rules.d/50-privileged-commands.rules
         content: |
-          # Monitor setuid and setgid programs
           -a always,exit -F arch=b64 -S execve -F uid>=1000 -F euid!=0 -F auid!=unset -k privileged-commands
           -a always,exit -F arch=b32 -S execve -F uid>=1000 -F euid!=0 -F auid!=unset -k privileged-commands
-          
-          # Additional rule to monitor programs with setuid or setgid bit
           -a always,exit -F arch=b64 -S execve -F path=/usr/bin/sudo -k privileged-commands
           -a always,exit -F arch=b32 -S execve -F path=/usr/bin/sudo -k privileged-commands
-          
-          # Add other important commands you want to track here (e.g., su, chmod, etc.)
 
-    - name: Load new audit rules
+    - name: Remove existing compiled audit.rules (to avoid duplication errors)
+      file:
+        path: /etc/audit/audit.rules
+        state: absent
+
+    - name: Reload audit rules with augenrules
       command: augenrules --load
+      register: augenrules_result
+      failed_when: augenrules_result.rc != 0 and
+                   "'Rule exists' not in augenrules_result.stderr"
 
     - name: Check if auditd is in immutable mode
       command: auditctl -s
       register: audit_status
+      changed_when: false
 
     - name: Notify if reboot is required due to auditd immutable mode
       debug:
