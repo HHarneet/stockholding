@@ -1,0 +1,55 @@
+---
+- name: Ensure events that modify the system's network environment are collected
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Create audit rules for network environment changes
+      copy:
+        dest: /etc/audit/rules.d/50-network_environment.rules
+        owner: root
+        group: root
+        mode: '0640'
+        content: |
+          -a always,exit -F arch=b64 -S sethostname,setdomainname -k system-locale
+          -a always,exit -F arch=b32 -S sethostname,setdomainname -k system-locale
+          -w /etc/issue -p wa -k system-locale
+          -w /etc/issue.net -p wa -k system-locale
+          -w /etc/hosts -p wa -k system-locale
+          -w /etc/sysconfig/network -p wa -k system-locale
+          -w /etc/sysconfig/network-scripts/ -p wa -k system-locale
+
+    - name: Load new audit rules
+      command: augenrules --load
+
+    - name: Pause to ensure rules apply
+      pause:
+        seconds: 2
+
+    - name: Check if rules applied (for debug)
+      command: auditctl -l
+      register: auditctl_rules
+
+    - name: Show current auditctl rules
+      debug:
+        var: auditctl_rules.stdout_lines
+
+    - name: Fail if /etc/hosts audit rule is missing
+      fail:
+        msg: "Audit rule for /etc/hosts is missing!"
+      when: auditctl_rules.stdout is not search("-w /etc/hosts -p wa -k system-locale")
+
+    - name: Fail if sethostname (b64) rule is missing
+      fail:
+        msg: "Audit rule for sethostname (b64) is missing!"
+      when: auditctl_rules.stdout is not search("-a always,exit -F arch=b64 .*sethostname.*system-locale")
+
+    - name: Fail if sethostname (b32) rule is missing
+      fail:
+        msg: "Audit rule for sethostname (b32) is missing!"
+      when: auditctl_rules.stdout is not search("-a always,exit -F arch=b32 .*sethostname.*system-locale")
+
+    - name: Fail if /etc/sysconfig/network-scripts rule is missing
+      fail:
+        msg: "Audit rule for /etc/sysconfig/network-scripts/ is missing!"
+      when: auditctl_rules.stdout is not search("-w /etc/sysconfig/network-scripts/ -p wa -k system-locale")
