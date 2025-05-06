@@ -2,6 +2,7 @@
 - name: Ensure time-change audit rules are applied
   hosts: all
   become: true
+
   tasks:
     - name: Ensure time-change audit rules file exists
       copy:
@@ -14,46 +15,43 @@
         owner: root
         group: root
 
-    - name: Reload audit rules
+    - name: Reload audit rules using augenrules
       command: augenrules --load
-      ignore_errors: yes
+      ignore_errors: false
 
-    - name: Wait for a short time to ensure rules are loaded
+    - name: Restart auditd to ensure new rules apply (if needed)
+      service:
+        name: auditd
+        state: restarted
+
+    - name: Wait 2 seconds after restarting auditd
       pause:
         seconds: 2
 
-    - name: Check if time-change rules are applied
+    - name: Get current audit rules
       command: auditctl -l
-      register: audit_rules
-      failed_when: "'time-change' not in audit_rules.stdout"
+      register: auditctl_output
 
-    - name: Fail if time-change rules are not applied
+    - name: Show current audit rules (for debugging)
+      debug:
+        var: auditctl_output.stdout_lines
+
+    - name: Fail if adjtimex rule is missing
       fail:
-        msg: "Time-change audit rules are not applied correctly."
-      when: "'time-change' not in audit_rules.stdout"
+        msg: "Missing audit rule for adjtimex (b64)"
+      when: auditctl_output.stdout is not search("adjtimex.*time-change")
 
-    - name: Validate time-change rules for adjtimex (b64)
-      command: auditctl -l | grep -E "adjtimex.*time-change"
-      register: adjtimex_rule
-      failed_when: adjtimex_rule.stdout == ""
-      ignore_errors: yes
-
-    - name: Validate time-change rules for settimeofday (b64)
-      command: auditctl -l | grep -E "settimeofday.*time-change"
-      register: settimeofday_rule
-      failed_when: settimeofday_rule.stdout == ""
-      ignore_errors: yes
-
-    - name: Validate time-change rules for clock_settime (b64)
-      command: auditctl -l | grep -E "clock_settime.*time-change"
-      register: clock_settime_rule
-      failed_when: clock_settime_rule.stdout == ""
-      ignore_errors: yes
-
-    - name: Fail if any of the time-change rules are missing
+    - name: Fail if settimeofday rule is missing
       fail:
-        msg: "One or more time-change audit rules are missing."
-      when: 
-        - adjtimex_rule.stdout == ""
-        - settimeofday_rule.stdout == ""
-        - clock_settime_rule.stdout == ""
+        msg: "Missing audit rule for settimeofday (b64)"
+      when: auditctl_output.stdout is not search("settimeofday.*time-change")
+
+    - name: Fail if clock_settime rule is missing
+      fail:
+        msg: "Missing audit rule for clock_settime (b64)"
+      when: auditctl_output.stdout is not search("clock_settime.*time-change")
+
+    - name: Fail if /etc/localtime watch rule is missing
+      fail:
+        msg: "Missing audit rule for /etc/localtime (watch)"
+      when: auditctl_output.stdout is not search("-w /etc/localtime -p wa -k time-change")
