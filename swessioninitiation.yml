@@ -2,36 +2,38 @@
 - name: Configure and load session initiation audit rules
   hosts: all
   become: true
-  tasks:
 
+  tasks:
     - name: Ensure /etc/audit/rules.d directory exists
       file:
         path: /etc/audit/rules.d
         state: directory
         mode: '0755'
 
-    - name: Get UID_MIN value from /etc/login.defs
-      command: awk '/^UID_MIN/ {print $2}' /etc/login.defs
-      register: uid_min_result
-      failed_when: uid_min_result.stdout == ''
-      changed_when: false
+    - name: Define required session audit rules
+      set_fact:
+        session_rules:
+          - "-w /var/run/utmp -p wa -k session"
+          - "-w /var/log/wtmp -p wa -k session"
+          - "-w /var/log/btmp -p wa -k session"
 
-    - name: Create 50-session.rules file for session initiation monitoring
-      copy:
-        dest: "/etc/audit/rules.d/50-session.rules"
-        content: |
+    - name: Ensure session audit rules exist without duplication
+      blockinfile:
+        path: /etc/audit/rules.d/50-session.rules
+        marker: "# {mark} ANSIBLE MANAGED BLOCK: Session audit rules"
+        block: |
           -w /var/run/utmp -p wa -k session
           -w /var/log/wtmp -p wa -k session
           -w /var/log/btmp -p wa -k session
+        create: yes
         mode: '0644'
 
-    - name: Load the new session initiation audit rules with augenrules
+    - name: Load the new audit rules with augenrules
       command: augenrules --load
       register: augenrules_result
-      failed_when: augenrules_result.rc != 0
-      changed_when: true
+      failed_when: augenrules_result.rc != 0 and '"Rule exists"' not in augenrules_result.stderr
 
-    - name: Check if a reboot is required
+    - name: Check if auditd is in immutable mode
       command: auditctl -s
       register: auditctl_status
       changed_when: false
@@ -39,7 +41,7 @@
 
     - name: Print if reboot is required
       debug:
-        msg: "Reboot required to load rules"
+        msg: "⚠️ Reboot required to load rules (auditd is in immutable mode)"
       when: "'enabled = 2' in auditctl_status.stdout"
 
     - name: Ensure auditd service is running
