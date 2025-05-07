@@ -9,33 +9,50 @@
       failed_when: uid_min.stdout == ""
       changed_when: false
 
-    - name: Backup existing audit rules file
+    - name: Backup /etc/audit/audit.rules if it exists
       copy:
-        src: "/etc/audit/rules.d/50-delete.rules"
-        dest: "/etc/audit/rules.d/50-delete.rules.bak"
-        backup: yes
-      when: ansible_facts['distribution'] == 'CentOS' or ansible_facts['distribution'] == 'RHEL'
-      # You can extend this to more distributions if necessary
+        src: /etc/audit/audit.rules
+        dest: /etc/audit/audit.rules.bak
+        remote_src: yes
+      when: ansible_facts['distribution_file_variety'] == "RedHat" and ansible_facts['os_family'] == "RedHat"
+
+    - name: Remove conflicting delete rules from /etc/audit/audit.rules
+      lineinfile:
+        path: /etc/audit/audit.rules
+        state: absent
+        regexp: '.*-S (rename|unlink|unlinkat|renameat).*key=delete.*'
+      when: ansible_facts['distribution_file_variety'] == "RedHat" and ansible_facts['os_family'] == "RedHat"
 
     - name: Remove existing file deletion rules from rules.d
       shell: |
         grep -l 'key=delete' /etc/audit/rules.d/*.rules | xargs -r rm -f
       changed_when: false
 
-    - name: Create audit rule to monitor file deletion events
+    - name: Backup existing 50-delete.rules file if present
+      copy:
+        src: "/etc/audit/rules.d/50-delete.rules"
+        dest: "/etc/audit/rules.d/50-delete.rules.bak"
+        remote_src: yes
+      when: ansible_facts['distribution_file_variety'] == "RedHat" and ansible_facts['os_family'] == "RedHat"
+      ignore_errors: yes
+
+    - name: Create audit rule to monitor file deletion events (64-bit)
       lineinfile:
         dest: "/etc/audit/rules.d/50-delete.rules"
-        line: |
-          # Monitor file deletion and renaming by users
-          -a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
-          -a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
+        line: "-a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete"
         create: yes
-      when: uid_min.stdout != ""
+        insertafter: EOF
 
-    - name: Ensure audit rules are loaded
+    - name: Create audit rule to monitor file deletion events (32-bit)
+      lineinfile:
+        dest: "/etc/audit/rules.d/50-delete.rules"
+        line: "-a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete"
+        insertafter: EOF
+
+    - name: Reload audit rules
       command: augenrules --load
       register: augenrules_output
-      failed_when: augenrules_output.rc != 0
+      failed_when: "'There was an error' in augenrules_output.stderr and 'Rule exists' not in augenrules_output.stderr"
       notify:
         - Check audit rules
 
