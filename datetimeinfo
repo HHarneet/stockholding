@@ -1,39 +1,30 @@
 ---
-- name: Ensure time change events are captured in audit logs
+- name: Ensure events that modify date and time information are collected
   hosts: all
-  become: true  # Ensure we run tasks as root
+  become: true
+  gather_facts: false
 
   tasks:
-    - name: Ensure the file /etc/audit/rules.d/50-time-change.rules exists and contains the correct rules
-      lineinfile:
-        path: /etc/audit/rules.d/50-time-change.rules
-        create: yes
-        line: |
+    - name: Create audit rule for date and time changes
+      copy:
+        dest: /etc/audit/rules.d/50-time-change.rules
+        owner: root
+        group: root
+        mode: '0640'
+        content: |
           -a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change
-          -a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k time-change
+          -a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime,stime -k time-change
           -w /etc/localtime -p wa -k time-change
-      notify:
-        - Reload audit rules
 
-    - name: Verify the audit rules are applied correctly
-      command: auditctl -l
-      register: auditctl_output
-      changed_when: false
-
-    - name: Fail if time-change rules are not applied
-      fail:
-        msg: "Time-change audit rules are not applied correctly."
-      when: "'time-change' not in auditctl_output.stdout"
-
-  handlers:
-    - name: Reload audit rules
+    - name: Load audit rules
       command: augenrules --load
-      notify:
-        - Check if reboot is required
 
     - name: Check if reboot is required
-      command: |
-        if [[ $(auditctl -s | grep "enabled") =~ "2" ]]; then
-          echo "Reboot required to load rules";
-        fi
-      ignore_errors: yes
+      shell: |
+        auditctl -s | grep "enabled"
+      register: audit_status
+
+    - name: Display message if reboot is required
+      debug:
+        msg: "Reboot required to fully load audit rules"
+      when: '"enabled 2" in audit_status.stdout'
