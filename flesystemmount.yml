@@ -1,48 +1,37 @@
 ---
-- name: Configure and load mount audit rules
+- name: Ensure only root owns audit log files
   hosts: all
   become: true
+  gather_facts: false
+
   tasks:
-
-    - name: Ensure /etc/audit/rules.d directory exists
-      file:
-        path: /etc/audit/rules.d
-        state: directory
-        mode: '0755'
-
-    - name: Get UID_MIN value from /etc/login.defs
-      command: awk '/^UID_MIN/ {print $2}' /etc/login.defs
-      register: uid_min_result
-      failed_when: uid_min_result.stdout == ''
+    - name: Extract audit log file path from auditd.conf
+      shell: |
+        awk -F '=' '/^\s*log_file/ {gsub(/ /, "", $2); print $2}' /etc/audit/auditd.conf
+      register: audit_log_file
       changed_when: false
 
-    - name: Create the 50-mounts.rules file for auditing
-      copy:
-        dest: "/etc/audit/rules.d/50-mounts.rules"
-        content: |
-          -a always,exit -F arch=b32 -S mount -F auid>={{ uid_min_result.stdout }} -F auid!=unset -k mounts
-          -a always,exit -F arch=b64 -S mount -F auid>={{ uid_min_result.stdout }} -F auid!=unset -k mounts
-        mode: '0644'
+    - name: Get audit log directory path
+      shell: dirname "{{ audit_log_file.stdout }}"
+      register: audit_log_dir
+      changed_when: false
 
-    - name: Load the new audit rules with augenrules
-      command: augenrules --load
-      register: augenrules_result
-      failed_when: augenrules_result.rc != 0
-      changed_when: true
+    - name: Backup current audit log files and directory
+      command: cp -r "{{ audit_log_dir.stdout }}" "{{ audit_log_dir.stdout }}-backup-{{ ansible_date_time.iso8601 }}"
+      when: audit_log_dir.stdout != ""
 
-    - name: Check if a reboot is required
-      command: auditctl -s
-      register: auditctl_status
+    - name: Check if rule for audit log files ownership already exists
+      shell: auditctl -l | grep '/etc/audit'
+      register: existing_rule
       changed_when: false
       failed_when: false
 
-    - name: Print if reboot is required
-      debug:
-        msg: "Reboot required to load rules"
-      when: "'enabled = 2' in auditctl_status.stdout"
+    - name: Add rule to ensure only root owns audit log files if it does not exist
+      shell: |
+        echo "-w {{ audit_log_dir.stdout }} -p wa -k auditlog-owner" >> /etc/audit/rules.d/50-auditlog.rules
+      when: existing_rule.stdout == ""
 
-    - name: Ensure auditd service is running
-      service:
-        name: auditd
-        state: started
-        enabled: true
+    - name: Ensure only root owns audit log files
+      shell: |
+        find "{{ audit_log_dir.stdout }}" -type f ! -user root -exec chown root {} +
+      when: audit_log_dir.stdout != ""
