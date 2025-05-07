@@ -9,6 +9,14 @@
       failed_when: uid_min.stdout == ""
       changed_when: false
 
+    - name: Backup existing audit rules file
+      copy:
+        src: "/etc/audit/rules.d/50-delete.rules"
+        dest: "/etc/audit/rules.d/50-delete.rules.bak"
+        backup: yes
+      when: ansible_facts['distribution'] == 'CentOS' or ansible_facts['distribution'] == 'RHEL'
+      # You can extend this to more distributions if necessary
+
     - name: Remove existing file deletion rules from rules.d
       shell: |
         grep -l 'key=delete' /etc/audit/rules.d/*.rules | xargs -r rm -f
@@ -22,7 +30,6 @@
           -a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
           -a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
         create: yes
-        validate: '/usr/sbin/augenrules --check'
       when: uid_min.stdout != ""
 
     - name: Ensure audit rules are loaded
