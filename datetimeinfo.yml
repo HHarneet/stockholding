@@ -4,7 +4,15 @@
   become: true
 
   tasks:
-    - name: Ensure time-change audit rules file exists
+    - name: Create backup of existing time-change rules file (if it exists)
+      copy:
+        src: /etc/audit/rules.d/50-time-change.rules
+        dest: /etc/audit/rules.d/50-time-change.rules.bak
+        remote_src: true
+      ignore_errors: true
+      when: ansible_facts['os_family'] != 'Windows'
+
+    - name: Ensure time-change audit rules file exists with correct content
       copy:
         dest: /etc/audit/rules.d/50-time-change.rules
         content: |
@@ -15,7 +23,14 @@
         owner: root
         group: root
 
-    - name: Check if time-change rules already exist in audit.rules
+    - name: Reload audit rules using augenrules
+      command: augenrules --load
+
+    - name: Pause to allow audit rules to apply
+      pause:
+        seconds: 2
+
+    - name: Get current audit rules
       command: auditctl -l
       register: auditctl_output
       changed_when: false
@@ -23,33 +38,22 @@
     - name: Fail if adjtimex rule is missing
       fail:
         msg: "Missing audit rule for adjtimex (b64)"
-      when: "'adjtimex.*time-change' not in auditctl_output.stdout"
+      when: auditctl_output.stdout is not search('adjtimex.*-k time-change')
 
     - name: Fail if settimeofday rule is missing
       fail:
         msg: "Missing audit rule for settimeofday (b64)"
-      when: "'settimeofday.*time-change' not in auditctl_output.stdout"
+      when: auditctl_output.stdout is not search('settimeofday.*-k time-change')
 
     - name: Fail if clock_settime rule is missing
       fail:
         msg: "Missing audit rule for clock_settime (b64)"
-      when: "'clock_settime.*time-change' not in auditctl_output.stdout"
+      when: auditctl_output.stdout is not search('clock_settime.*-k time-change')
 
     - name: Fail if /etc/localtime watch rule is missing
       fail:
         msg: "Missing audit rule for /etc/localtime"
-      when: "'-w /etc/localtime -p wa -k time-change' not in auditctl_output.stdout"
-
-    - name: Reload audit rules using augenrules (only if changes were made)
-      command: augenrules --load
-      when: auditctl_output.stdout is not search("adjtimex.*time-change") or
-            auditctl_output.stdout is not search("settimeofday.*time-change") or
-            auditctl_output.stdout is not search("clock_settime.*time-change") or
-            auditctl_output.stdout is not search("-w /etc/localtime -p wa -k time-change")
-
-    - name: Pause to allow audit rules to apply
-      pause:
-        seconds: 2
+      when: auditctl_output.stdout is not search('-w /etc/localtime -p wa -k time-change')
 
     - name: Show current audit rules (for debugging)
       debug:
