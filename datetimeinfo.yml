@@ -1,32 +1,28 @@
 ---
-- name: Ensure time-change audit rules are applied
+- name: Ensure time-change audit rules are applied correctly
   hosts: all
   become: true
 
   tasks:
-
-    - name: Backup /etc/audit/rules.d/50-time-change.rules if it exists
+    - name: Backup current audit rule files
       copy:
-        src: /etc/audit/rules.d/50-time-change.rules
-        dest: /etc/audit/rules.d/50-time-change.rules.bak
+        src: "{{ item }}"
+        dest: "{{ item }}.bak"
         remote_src: true
+      loop:
+        - /etc/audit/rules.d/50-time-change.rules
+        - /etc/audit/audit.rules
       ignore_errors: true
 
-    - name: Backup /etc/audit/audit.rules if it exists
+    - name: Remove legacy /etc/audit/audit.rules content to avoid augenrules errors
       copy:
-        src: /etc/audit/audit.rules
-        dest: /etc/audit/audit.rules.bak
-        remote_src: true
-      ignore_errors: true
+        dest: /etc/audit/audit.rules
+        content: ""
+        owner: root
+        group: root
+        mode: '0640'
 
-    - name: Remove duplicate time-change rules from audit.rules
-      lineinfile:
-        path: /etc/audit/audit.rules
-        state: absent
-        regexp: '.*(adjtimex|settimeofday|clock_settime|-w /etc/localtime).*'
-      ignore_errors: true
-
-    - name: Ensure correct time-change rules file exists
+    - name: Create time-change audit rule file
       copy:
         dest: /etc/audit/rules.d/50-time-change.rules
         content: |
@@ -37,10 +33,10 @@
         group: root
         mode: '0644'
 
-    - name: Flush current audit rules to avoid duplication
+    - name: Flush all existing audit rules
       command: auditctl -D
 
-    - name: Reload audit rules
+    - name: Reload audit rules from rules.d using augenrules
       command: augenrules --load
 
     - name: Pause briefly to let audit rules apply
@@ -63,10 +59,10 @@
           - "^-a always,exit -F arch=b32 -S clock_settime .* -k time-change"
           - "^-w /etc/localtime -p wa -k time-change"
       fail:
-        msg: "Missing audit rule: {{ item }}"
+        msg: "One or more required audit rules are missing."
       when: auditctl_output.stdout_lines | reject('search', item) | list | length > 0
       loop: "{{ required_rules }}"
 
-    - name: Show audit rules (debug)
+    - name: Debug current audit rules
       debug:
         var: auditctl_output.stdout_lines
