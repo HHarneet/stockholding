@@ -19,13 +19,12 @@
         remote_src: true
       ignore_errors: true
 
-    - name: Remove duplicate time-change rules from audit.rules (if any)
+    - name: Remove duplicate time-change rules from audit.rules
       lineinfile:
         path: /etc/audit/audit.rules
         state: absent
         regexp: '.*(adjtimex|settimeofday|clock_settime|-w /etc/localtime).*'
       ignore_errors: true
-      notify: Reload audit rules
 
     - name: Ensure correct time-change rules file exists
       copy:
@@ -37,9 +36,14 @@
         owner: root
         group: root
         mode: '0644'
-      notify: Reload audit rules
 
-    - name: Wait briefly for rules to apply
+    - name: Flush current audit rules to avoid duplication
+      command: auditctl -D
+
+    - name: Reload audit rules
+      command: augenrules --load
+
+    - name: Pause briefly to let audit rules apply
       pause:
         seconds: 2
 
@@ -59,14 +63,10 @@
           - "^-a always,exit -F arch=b32 -S clock_settime .* -k time-change"
           - "^-w /etc/localtime -p wa -k time-change"
       fail:
-        msg: "One or more required audit rules are missing."
+        msg: "Missing audit rule: {{ item }}"
       when: auditctl_output.stdout_lines | reject('search', item) | list | length > 0
       loop: "{{ required_rules }}"
 
     - name: Show audit rules (debug)
       debug:
         var: auditctl_output.stdout_lines
-
-  handlers:
-    - name: Reload audit rules
-      command: augenrules --load
