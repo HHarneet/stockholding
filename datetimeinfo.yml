@@ -4,28 +4,30 @@
   become: true
 
   tasks:
-    - name: Backup existing /etc/audit/rules.d/50-time-change.rules if it exists
+
+    - name: Backup /etc/audit/rules.d/50-time-change.rules if it exists
       copy:
         src: /etc/audit/rules.d/50-time-change.rules
         dest: /etc/audit/rules.d/50-time-change.rules.bak
         remote_src: true
       ignore_errors: true
 
-    - name: Backup /etc/audit/audit.rules (legacy rule file)
+    - name: Backup /etc/audit/audit.rules if it exists
       copy:
         src: /etc/audit/audit.rules
         dest: /etc/audit/audit.rules.bak
         remote_src: true
       ignore_errors: true
 
-    - name: Remove conflicting time-change rules from audit.rules (if any)
+    - name: Remove duplicate time-change rules from audit.rules (if any)
       lineinfile:
         path: /etc/audit/audit.rules
         state: absent
         regexp: '.*(adjtimex|settimeofday|clock_settime|-w /etc/localtime).*'
+      ignore_errors: true
       notify: Reload audit rules
 
-    - name: Ensure correct time-change rules in rules.d
+    - name: Ensure correct time-change rules file exists
       copy:
         dest: /etc/audit/rules.d/50-time-change.rules
         content: |
@@ -37,7 +39,7 @@
         mode: '0644'
       notify: Reload audit rules
 
-    - name: Pause to allow audit rules to apply
+    - name: Wait briefly for rules to apply
       pause:
         seconds: 2
 
@@ -46,27 +48,22 @@
       register: auditctl_output
       changed_when: false
 
-    - name: Fail if adjtimex rule is missing
+    - name: Validate required time-change audit rules
+      vars:
+        required_rules:
+          - "^-a always,exit -F arch=b64 -S adjtimex .* -k time-change"
+          - "^-a always,exit -F arch=b64 -S settimeofday .* -k time-change"
+          - "^-a always,exit -F arch=b64 -S clock_settime .* -k time-change"
+          - "^-a always,exit -F arch=b32 -S adjtimex .* -k time-change"
+          - "^-a always,exit -F arch=b32 -S settimeofday .* -k time-change"
+          - "^-a always,exit -F arch=b32 -S clock_settime .* -k time-change"
+          - "^-w /etc/localtime -p wa -k time-change"
       fail:
-        msg: "Missing audit rule for adjtimex (b64)"
-      when: auditctl_output.stdout is not search('adjtimex.*-k time-change')
+        msg: "One or more required audit rules are missing."
+      when: auditctl_output.stdout_lines | reject('search', item) | list | length > 0
+      loop: "{{ required_rules }}"
 
-    - name: Fail if settimeofday rule is missing
-      fail:
-        msg: "Missing audit rule for settimeofday (b64)"
-      when: auditctl_output.stdout is not search('settimeofday.*-k time-change')
-
-    - name: Fail if clock_settime rule is missing
-      fail:
-        msg: "Missing audit rule for clock_settime (b64)"
-      when: auditctl_output.stdout is not search('clock_settime.*-k time-change')
-
-    - name: Fail if /etc/localtime watch rule is missing
-      fail:
-        msg: "Missing audit rule for /etc/localtime"
-      when: auditctl_output.stdout is not search('-w /etc/localtime -p wa -k time-change')
-
-    - name: Show current audit rules (for debugging)
+    - name: Show audit rules (debug)
       debug:
         var: auditctl_output.stdout_lines
 
