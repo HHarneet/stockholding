@@ -4,27 +4,38 @@
   become: true
 
   tasks:
-    - name: Create backup of existing time-change rules file (if it exists)
+    - name: Backup existing /etc/audit/rules.d/50-time-change.rules if it exists
       copy:
         src: /etc/audit/rules.d/50-time-change.rules
         dest: /etc/audit/rules.d/50-time-change.rules.bak
         remote_src: true
       ignore_errors: true
-      when: ansible_facts['os_family'] != 'Windows'
 
-    - name: Ensure time-change audit rules file exists with correct content
+    - name: Backup /etc/audit/audit.rules (legacy rule file)
+      copy:
+        src: /etc/audit/audit.rules
+        dest: /etc/audit/audit.rules.bak
+        remote_src: true
+      ignore_errors: true
+
+    - name: Remove conflicting time-change rules from audit.rules (if any)
+      lineinfile:
+        path: /etc/audit/audit.rules
+        state: absent
+        regexp: '.*(adjtimex|settimeofday|clock_settime|-w /etc/localtime).*'
+      notify: Reload audit rules
+
+    - name: Ensure correct time-change rules in rules.d
       copy:
         dest: /etc/audit/rules.d/50-time-change.rules
         content: |
           -a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change
           -a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k time-change
           -w /etc/localtime -p wa -k time-change
-        mode: '0644'
         owner: root
         group: root
-
-    - name: Reload audit rules using augenrules
-      command: augenrules --load
+        mode: '0644'
+      notify: Reload audit rules
 
     - name: Pause to allow audit rules to apply
       pause:
@@ -58,3 +69,7 @@
     - name: Show current audit rules (for debugging)
       debug:
         var: auditctl_output.stdout_lines
+
+  handlers:
+    - name: Reload audit rules
+      command: augenrules --load
