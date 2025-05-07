@@ -9,13 +9,20 @@
       failed_when: uid_min.stdout == ""
       changed_when: false
 
+    - name: Remove existing file deletion rules from rules.d
+      shell: |
+        grep -l 'key=delete' /etc/audit/rules.d/*.rules | xargs -r rm -f
+      changed_when: false
+
     - name: Create audit rule to monitor file deletion events
-      copy:
+      lineinfile:
         dest: "/etc/audit/rules.d/50-delete.rules"
-        content: |
+        line: |
           # Monitor file deletion and renaming by users
           -a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
           -a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>={{ uid_min.stdout }} -F auid!=unset -F key=delete
+        create: yes
+        validate: '/usr/sbin/augenrules --check'
       when: uid_min.stdout != ""
 
     - name: Ensure audit rules are loaded
