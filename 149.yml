@@ -2,7 +2,22 @@
 - name: Ensure audit rules for privileged commands (CIS 5.2.3.6)
   hosts: all
   become: true
+
   tasks:
+
+    - name: Backup existing privileged commands rules if present
+      copy:
+        src: /etc/audit/rules.d/50-privileged-commands.rules
+        dest: /etc/audit/rules.d/50-privileged-commands.rules.bak
+        remote_src: true
+      ignore_errors: true
+
+    - name: Backup existing audit.rules if present
+      copy:
+        src: /etc/audit/audit.rules
+        dest: /etc/audit/audit.rules.bak
+        remote_src: true
+      ignore_errors: true
 
     - name: Ensure audit rules for privileged commands are in place
       copy:
