@@ -12,8 +12,15 @@
       - /sbin/autrace
       - /sbin/auditd
       - /sbin/augenrules
+    backup_dir: "/root/audit_tool_backups"  # Define where backups will be stored
 
   tasks:
+    - name: Ensure backup directory exists
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
     - name: Check which audit tools exist
       ansible.builtin.command: test -f {{ item }}
       register: tool_check
@@ -21,6 +28,16 @@
       loop: "{{ audit_tools }}"
       loop_control:
         label: "{{ item }}"
+
+    - name: Backup existing audit tools
+      copy:
+        src: "{{ item.item }}"
+        dest: "{{ backup_dir }}/{{ item.item | basename }}"
+        backup: yes  # Automatically back up the file before any changes
+      when: item.rc == 0
+      loop: "{{ tool_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
 
     - name: Fix permissions (chmod go-w) on existing tools
       ansible.builtin.shell: chmod go-w "{{ item.item }}"
