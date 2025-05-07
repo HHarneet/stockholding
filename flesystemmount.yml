@@ -2,7 +2,7 @@
 - name: Ensure only root owns audit log files
   hosts: all
   become: true
-  gather_facts: false
+  gather_facts: true  # Ensure facts are gathered so ansible_date_time is available
 
   tasks:
     - name: Extract audit log file path from auditd.conf
@@ -19,17 +19,6 @@
     - name: Backup current audit log files and directory
       command: cp -r "{{ audit_log_dir.stdout }}" "{{ audit_log_dir.stdout }}-backup-{{ ansible_date_time.iso8601 }}"
       when: audit_log_dir.stdout != ""
-
-    - name: Check if rule for audit log files ownership already exists
-      shell: auditctl -l | grep '/etc/audit'
-      register: existing_rule
-      changed_when: false
-      failed_when: false
-
-    - name: Add rule to ensure only root owns audit log files if it does not exist
-      shell: |
-        echo "-w {{ audit_log_dir.stdout }} -p wa -k auditlog-owner" >> /etc/audit/rules.d/50-auditlog.rules
-      when: existing_rule.stdout == ""
 
     - name: Ensure only root owns audit log files
       shell: |
